@@ -479,6 +479,8 @@ function convert_eltype(::Type{UInt8}, A::AbstractArray{<:AbstractString,N};
         end
         off += firstdim
     end
+    @show A
+    @show firstdim
     firstdim ≥ maxlen || @warn "strings have been truncated to $firstdim characters, whereas $maxlen are needed"
     nbads == 0 || @warn "$nbads non-ASCII or null characters have been filtered"
     return B
@@ -902,7 +904,7 @@ table may be created in a single call:
 """
 function write(file::FitsFile, ::Type{FitsTableHDU},
                cols::Pair{<:ColumnName,<:Any}...; kwds...)
-    return write(file, FITSTableHDU, cols; kwds...)
+    return write(file, FitsTableHDU, cols; kwds...)
 end
 
 function write(file::FitsFile, ::Type{FitsTableHDU},
@@ -1044,7 +1046,15 @@ function write(hdu::FitsTableHDU,
     else
         off = 0 # all leading dimensions must be identical
     end
-    n = cell_ndims - off # number of dimension to compare
+    n = (cell_ndims == 0) ? 0 : cell_ndims - off # number of dimension to compare
+    @show cell_dims
+    @show cell_ndims
+    @show vals
+    @show vals_dims
+    @show vals_ndims
+    @show off
+    @show n
+    @show vals_ndims
     ((vals_ndims == n)|(vals_ndims == n+1)) || throw(DimensionMismatch("bad number of dimensions"))
     for i in 1:n
         vals_dims[i] == cell_dims[i+off] || throw(DimensionMismatch("incompatible dimension"))
@@ -1056,8 +1066,13 @@ function write(hdu::FitsTableHDU,
         fillchar =
             null === nothing || isempty(null) ? '\0' :
             null == " " ? ' ' : bad_argument("invalid `null` value")
-        firstdim = Base.first(cell_dims) # number of character per string as stored in this column
-        temp = convert_eltype(UInt8, vals; firstdim, fillchar)
+        if cell_ndims == 0
+            @show temp = convert_eltype(UInt8, vals; fillchar)
+        else
+            firstdim = Base.first(cell_dims) # number of character per string as stored in this column
+            temp = convert_eltype(UInt8, vals; firstdim, fillchar)
+        end
+#        unsafe_write_col(hdu, num, first, 1, length(vals), vals, nothing)
         unsafe_write_col(hdu, num, first, 1, length(temp), temp, nothing)
     else
         null isa AbstractString && bad_argument("invalid `null` type")
