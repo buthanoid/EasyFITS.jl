@@ -2,7 +2,7 @@ module TestingEasyFITS
 
 using Test, EasyFITS, Dates, DataFrames
 
-using EasyFITS: FitsInteger, FitsFloat, FitsComplex
+using EasyFITS: FitsInteger, FitsFloat, FitsComplex, get_buffer_ranges, get_buffer_size
 
 column_values(arg::AbstractArray) = arg
 column_values(arg::Tuple{AbstractArray,AbstractString}) = arg[1]
@@ -722,6 +722,201 @@ end
             @test_throws ArgumentError write(hdu, :col1 => ["abcd"])
         end
     end
+end
+
+@testset "get_buffer_ranges, get_buffer_size" begin
+    # colons
+    hdu_data_size, inds, bins = (10, 20, 30), (:,:,:), (1,1,1)
+    @test get_buffer_ranges(hdu_data_size, inds, bins) == (1:10, 1:20, 1:30)
+    @test get_buffer_size(hdu_data_size, inds, bins) == (10, 20, 30)
+
+    # colons binning
+    hdu_data_size, inds, bins = (10, 20, 30), (:,:,:), (2,1,3)
+    @test get_buffer_ranges(hdu_data_size, inds, bins) == (1:10, 1:20, 1:30)
+    @test get_buffer_size(hdu_data_size, inds, bins) == (10, 20, 30)
+
+    # integers
+    hdu_data_size, inds, bins = (10, 20, 30), (1,:,18:18), (1,1,1)
+    @test get_buffer_ranges(hdu_data_size, inds, bins) == (1:1, 1:20, 18:18)
+    @test get_buffer_size(hdu_data_size, inds, bins) == (1, 20, 1)
+
+    # integers binning
+    hdu_data_size, inds, bins = (10, 20, 30), (1,:,18:18), (2,1,3)
+    @test get_buffer_ranges(hdu_data_size, inds, bins) == (1:2, 1:20, 18:20)
+    @test get_buffer_size(hdu_data_size, inds, bins) == (2, 20, 3)
+
+    # indexranges
+    hdu_data_size, inds, bins = (10, 20, 30), (1:9,1:20,18:26), (1,1,1)
+    @test get_buffer_ranges(hdu_data_size, inds, bins) == (1:9,1:20, 18:26)
+    @test get_buffer_size(hdu_data_size, inds, bins) == (9, 20, 9)
+
+    # indexranges binning
+    hdu_data_size, inds, bins = (10, 20, 30), (1:9,1:20,18:26), (2,1,3)
+    @test get_buffer_ranges(hdu_data_size, inds, bins) == (1:10, 1:20, 18:28)
+    @test get_buffer_size(hdu_data_size, inds, bins) == (10, 20, 11)
+
+    # indexrange step
+    hdu_data_size, inds, bins = (10, 20, 30), (2:1:9, 1:2:18, 18:3:26), (1,1,1)
+    @test get_buffer_ranges(hdu_data_size, inds, bins) == (2:1:9, 1:2:17, 18:3:24)
+    @test get_buffer_size(hdu_data_size, inds, bins) == (8, 9, 3)
+
+    # indexrange step binning
+    hdu_data_size, inds, bins = (10, 20, 30), (2:1:9, 1:2:18, 18:3:26), (2,2,4)
+    @test get_buffer_ranges(hdu_data_size, inds, bins) == (2:1:10, 1:1:18, 18:1:27)
+    @test get_buffer_size(hdu_data_size, inds, bins) == (9, 18, 10)
+
+    # mixed
+    hdu_data_size, inds, bins = (10, 20, 30), (2:2:7,3,:), (1,1,1)
+    @test get_buffer_ranges(hdu_data_size, inds, bins) == (2:2:6, 3:3, 1:30)
+    @test get_buffer_size(hdu_data_size, inds, bins) == (3, 1, 30)
+
+    # mixed binning
+    hdu_data_size, inds, bins = (10, 20, 30), (2:2:7,3,:), (2,2,3)
+    @test get_buffer_ranges(hdu_data_size, inds, bins) == (2:7, 3:4, 1:30)
+    @test get_buffer_size(hdu_data_size, inds, bins) == (6, 2, 30)
+
+    # indexrange out of bounds
+    hdu_data_size, inds, bins = (10, 20, 30), (1:11,:,:), (1,1,1)
+    @test_throws ArgumentError get_buffer_ranges(hdu_data_size, inds, bins)
+
+    # indexrange binning out of bounds
+    hdu_data_size, inds, bins = (10, 20, 30), (1:10,:,:), (2,1,1)
+    @test_throws ArgumentError get_buffer_ranges(hdu_data_size, inds, bins)
+
+    # indexrange step out of bounds
+    hdu_data_size, inds, bins = (10, 20, 30), (1:2:11,:,:), (1,1,1)
+    @test_throws ArgumentError get_buffer_ranges(hdu_data_size, inds, bins)
+
+    # indexrange step NO out of bounds because last is modified by step
+    hdu_data_size, inds, bins = (10, 20, 30), (1:3:11,:,:), (1,1,1)
+    @test_nowarn get_buffer_ranges(hdu_data_size, inds, bins)
+
+    # indexrange step binning out of bounds
+    hdu_data_size, inds, bins = (10, 20, 30), (1:2:9,:,:), (3,1,1)
+    @test_throws ArgumentError get_buffer_ranges(hdu_data_size, inds, bins)
+
+    # indexrange step binning NO out of bounds because last is modified by step
+    hdu_data_size, inds, bins = (10, 20, 30), (1:300:10,:,:), (10,1,1)
+    @test_nowarn get_buffer_ranges(hdu_data_size, inds, bins)
+
+    # integer out of bounds
+    hdu_data_size, inds, bins = (10, 20, 30), (11,:,:), (1,1,1)
+    @test_throws ArgumentError get_buffer_ranges(hdu_data_size, inds, bins)
+
+    # integer binning out of bounds
+    hdu_data_size, inds, bins = (10, 20, 30), (10,:,:), (2,1,1)
+    @test_throws ArgumentError get_buffer_ranges(hdu_data_size, inds, bins)
+end
+
+@testset "read with binning" begin
+    filepath, _ = mktemp()
+
+    data = Array{Int,3}(undef, 2, 3, 3)
+
+    data[:,:,1] = [ 1  3  5
+                    2  4  6 ]
+
+    data[:,:,2] = [ 7  9  11
+                    8  10 12 ]
+
+    data[:,:,3] = [ 13 15 17
+                    14 16 18 ]
+
+    writefits!(filepath, FitsHeader(), data)
+    hdu = openfits(filepath)[1]
+
+    # colons
+    @test read(hdu, (:,:,:), (1,1,1)) == data
+
+    # colons binning (first dim gets length 1)
+    res = Array{Int,3}(undef, 1, 3, 3)
+    res[:,:,1] = [ 1+2   3+4   5+6   ]
+    res[:,:,2] = [ 7+8   9+10  11+12 ]
+    res[:,:,3] = [ 13+14 15+16 17+18 ]
+    @test read(hdu, (:,:,:), (2,1,1)) == res
+
+    # colons binning (second dim gets length 2)
+    res = Array{Int,3}(undef, 2, 2, 3)
+    res[:,:,1] = [ 1+3   3+5
+                   2+4   4+6   ]
+    res[:,:,2] = [ 7+9   9+11
+                   8+10  10+12 ]
+    res[:,:,3] = [ 13+15 15+17
+                   14+16 16+18 ]
+    @test read(hdu, (:,:,:), (1,2,1)) == res
+
+    # colons binning (second and third dim get length 2)
+    res = Array{Int,3}(undef, 2, 2, 2)
+    res[:,:,1] = [ 1+3+7+9    3+5+9+11
+                   2+4+8+10   4+6+10+12   ]
+    res[:,:,2] = [ 7+9+13+15  9+11+15+17
+                   8+10+14+16 10+12+16+18 ]
+    @test read(hdu, (:,:,:), (1,2,2)) == res
+
+    # integers
+    res = Array{Int,0}(undef)
+    res[1] = 15
+    @test read(hdu, (1,2,3), (1,1,1)) == res
+    @test read(hdu, (1,:,:), (1,1,1)) == data[1,:,:]
+    @test read(hdu, (:,2,:), (1,1,1)) == data[:,2,:]
+    @test read(hdu, (:,:,3), (1,1,1)) == data[:,:,3]
+
+    # integers binning
+    res = Array{Int,0}(undef)
+    res[1] = 1+3+7+9+13+15
+    @test read(hdu, (1,1,1), (1,2,3)) == res
+
+    # indexrange
+    @test read(hdu, (1:2,1:3,1:3), (1,1,1)) == data
+    @test read(hdu, (1:1,2:2,3:3), (1,1,1)) == data[1:1,2:2,3:3]
+
+    # indexrange binning
+    res = Array{Int,3}(undef, 2, 2, 1)
+    res[:,:,1] = [ 1+3+7+9+13+15  3+5+9+11+15+17
+                   2+4+8+10+14+16 4+6+10+12+16+18 ]
+    @test read(hdu, (1:2,1:2,1:1), (1,2,3)) == res
+
+    # indexrange step
+    res = Array{Int,3}(undef, 2, 2, 1)
+    res[:,:,1] = [ 1 5
+                   2 6 ]
+    @test read(hdu, (1:1:2, 1:2:3, 1:3:1), (1,1,1)) == res
+
+    # indexrange step binning
+    res = Array{Int,3}(undef, 1,1,1)
+    res[1] = 3+4+5+6+9+10+11+12+15+16+17+18
+    @test read(hdu, (1:1:1, 2:2:2, 1:3:1), (2,2,3)) == res
+
+    # mixed
+    res = Array{Int,2}(undef, 2, 2)
+    res = [ 9  15
+            10 16 ]
+    @test read(hdu, (:,2,2:3), (1,1,1)) == res
+
+    # mixed binning
+    res = Array{Int,2}(undef, 1, 2)
+    res = [ 3+4+5+6+9+10+11+12 9+10+11+12+15+16+17+18 ]
+    @test read(hdu, (1:1,2,:), (2,2,2)) == res
+
+    # indexrange out of bounds
+    @test_throws ArgumentError read(hdu, (1:3,:,:), (1,1,1))
+    @test_throws ArgumentError read(hdu, (:,1:4,:), (1,1,1))
+    @test_throws ArgumentError read(hdu, (:,:,1:4), (1,1,1))
+
+    # indexrange binning out of bounds
+    @test_throws ArgumentError read(hdu, (1:2,:,:), (2,1,1))
+    @test_throws ArgumentError read(hdu, (:,1:3,:), (1,2,1))
+    @test_throws ArgumentError read(hdu, (:,:,1:3), (1,1,2))
+
+    # integer out of bounds
+    @test_throws ArgumentError read(hdu, (3,:,:), (1,1,1))
+    @test_throws ArgumentError read(hdu, (:,4,:), (1,1,1))
+    @test_throws ArgumentError read(hdu, (:,:,4), (1,1,1))
+
+    # integer binning out of bounds
+    @test_throws ArgumentError read(hdu, (2,:,:), (2,1,1))
+    @test_throws ArgumentError read(hdu, (:,3,:), (1,2,1))
+    @test_throws ArgumentError read(hdu, (:,:,3), (1,1,2))
 end
 
 end # module

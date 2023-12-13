@@ -262,6 +262,141 @@ function read!(arr::DenseArray{T,L},
     return arr
 end
 
+function read(hdu::FitsImageHDU{T,N}, inds::SubArrayIndices,
+              bins::NTuple{N,Integer}; kwds...) where {T,N}
+    return read(Array{T}, hdu, inds, bins; kwds...)
+end
+
+function read(::Type{R}, hdu::FitsImageHDU{T,N}, inds::SubArrayIndices,
+              bins::NTuple{N,Integer}; kwds...) where {R<:Array,T,N}
+    return read(R, hdu, inds, bins; kwds...)
+end
+
+function read(::Type{Array}, hdu::FitsImageHDU{T,N}, inds::SubArrayIndices,
+              bins::NTuple{N,Integer}; kwds...) where {T,N}
+    return read(Array{T}, hdu, inds, bins; kwds...)
+end
+
+function read(::Type{Array{T}}, hdu::FitsImageHDU{<:Any,N}, inds::SubArrayIndices,
+              bins::NTuple{N,Integer};
+              kwds...) where {T,N}
+    M = count(i -> !isa(i, Integer), inds) # count number of output dimensions
+    return read(Array{T,M}, hdu, inds, bins; kwds...)
+end
+
+function Base.read(::Type{Array{T,M}},
+                   hdu::FitsImageHDU{<:Any,N},
+                   inds::SubArrayIndices{N},
+                   bins::NTuple{N,Integer};
+                   binfunction::Function = sum,
+                   null::Union{DenseArray{Bool,N},Ref{T},Nothing} = nothing,
+                   anynull::Union{Nothing,Ref{Bool}} = nothing) where {T,N,M}
+
+    # changing Colon to range, so binning is not out of bounds
+    # for IndexRange the user must handle the bounds himself
+    inds = ntuple(N) do d
+        if bins[d] > 1 && inds[d] isa Colon
+            stop = hdu.data_size[d] - bins[d] + 1
+            1 ≤ stop ≤ hdu.data_size[d] || bad_argument("binning out of bounds on dim $d")
+            range(1, stop)
+        else
+            inds[d]
+        end
+    end
+
+    img_dims = get_img_size(hdu)
+    arr_dims, _ = subarray_params(img_dims, inds)
+    length(arr_dims) == M || throw(DimensionMismatch(
+        "given indices yield $(length(arr_dims)) dimension(s) not M=$M"))
+    return read!(new_array(T, arr_dims), hdu, inds, bins; binfunction, null, anynull)
+end
+
+# binfunction must apply on a N dimensional array, it simplifies things a lot.
+# null is for `buffer`, not for `arr`
+function Base.read!(arr::DenseArray{T},
+                    hdu::FitsImageHDU{<:Any,N},
+                    inds::SubArrayIndices{N},
+                    bins::NTuple{N,Integer};
+                    buffer::Union{DenseArray{T,N},Nothing} = nothing,
+                    binfunction::Function = sum,
+                    null::Union{DenseArray{Bool,N},Ref{T},Nothing} = nothing,
+                    anynull::Union{Nothing,Ref{Bool}} = nothing) where {T<:Number,N}
+
+    # buffer storing every needed micropixel
+    buffer_ranges = get_buffer_ranges(hdu.data_size, inds, bins)
+
+    if isnothing(buffer)
+        buffer = new_array(T, map(length, buffer_ranges))
+    end
+
+    read!(buffer, hdu, buffer_ranges; null, anynull)
+
+    bin_indices = Vector{SubArrayIndex}(undef, N)
+
+    for I in CartesianIndices(arr)  # for each macropixel
+
+        # find the buffer region (the micropixels) needed for this macropixel
+        reald = 0 # needed because dimension of `arr` can be < N
+        for d in 1:N
+            if inds[d] isa Integer
+                # if arr dim is Integer, we take the full buff dim, no matter its size
+                start = firstindex(buffer,d)
+                stop  = start + size(buffer,d) - 1
+            elseif inds[d] isa Colon
+                # if Colon we must start from current I, handle custom indexing and binning
+                reald += 1
+                start = firstindex(buffer,d) - firstindex(arr,reald) + I[reald]
+                stop  = start + bins[d] - 1
+            elseif inds[d] isa IndexRange
+                # if IndexRange we must also handle step if bin > 1  (see `get_buffer_ranges`)
+                reald += 1
+                if bins[d] > 1
+                    start = firstindex(buffer,d)
+                    start = start + step(inds[d]) * (I[reald] - firstindex(arr,reald))
+                else
+                    start = firstindex(buffer,d) - firstindex(arr,reald) + I[reald]
+                end
+                stop  = start + bins[d] - 1
+            else
+                bad_argument("unknown `SubArrayIndex` value: `$(inds[d])`")
+            end
+            bin_indices[d] = range(start, stop)
+        end
+
+        arr[I] = binfunction(view(buffer, bin_indices...))
+    end
+    return arr
+end
+
+# buffer always get same dimension as HDU, it simplifies things a lot
+function get_buffer_ranges(hdu_data_size::NTuple{N,Integer},
+                           inds::SubArrayIndices{N},
+                           bins::NTuple{N,Integer}) where {N}
+
+    (_, firsts, steps, lasts) = subarray_params(hdu_data_size, inds)
+
+    return ntuple(N) do d
+        if bins[d] == 1
+            range(firsts[d], lasts[d]; step=steps[d])
+        else
+            stop = (inds[d] isa Colon) ? hdu_data_size[d] : (lasts[d] + bins[d] - 1)
+            firsts[d] ≤ stop ≤ hdu_data_size[d] || bad_argument("binning out of bounds on dim $d")
+            step = 1  # in order to bin, we need the plain "rectangle"
+            range(firsts[d], stop; step)
+        end
+    end
+end
+
+function get_buffer_size(hdu_data_size::NTuple{N,Integer},
+                         inds::SubArrayIndices{N},
+                         bins::NTuple{N,Integer}) where {N}
+
+    buffer_ranges = get_buffer_ranges(hdu_data_size, inds, bins)
+    return map(length, buffer_ranges)
+end
+
+
+
 #------------------------------------------------------------------------------
 # WRITING FITS IMAGES
 
